@@ -115,6 +115,23 @@
   }
   .paste-btn:hover { opacity: 0.85; }
 
+  .clear-btn {
+    background: transparent;
+    color: var(--text2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .clear-btn:hover { background: #fdecea; color: #c0392b; border-color: #e8b4b0; }
+
   /* ── Legend ── */
   .legend-bar {
     background: var(--surface);
@@ -239,15 +256,33 @@
   .zip-chip {
     font-size: 9px;
     font-weight: 500;
-    padding: 1px 4px;
-    border-radius: 3px;
+    padding: 2px 5px;
+    border-radius: 4px;
     font-family: 'DM Mono', monospace;
     white-space: nowrap;
     cursor: default;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.3;
   }
   .s9  .zip-chip { background: var(--slot-9-chip);  color: var(--slot-9-text); }
   .s11 .zip-chip { background: var(--slot-11-chip); color: var(--slot-11-text); }
   .s1  .zip-chip { background: var(--slot-1-chip);  color: var(--slot-1-text); }
+
+  .zip-chip .chip-zip {
+    font-weight: 600;
+    font-size: 9px;
+  }
+  .zip-chip .chip-region {
+    font-size: 8px;
+    font-weight: 400;
+    opacity: 0.75;
+    font-family: 'DM Sans', sans-serif;
+    white-space: normal;
+    word-break: break-word;
+    max-width: 90px;
+  }
 
   /* ── Paste modal ── */
   .modal-backdrop {
@@ -423,6 +458,10 @@
     <button class="paste-btn" id="open-paste">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
       Paste Data
+    </button>
+    <button class="clear-btn" id="clear-btn" style="display:none">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+      Clear
     </button>
   </div>
 </header>
@@ -670,14 +709,22 @@ function renderCalendar() {
             .forEach(([zip, info]) => {
               const chip = document.createElement('span');
               chip.className = 'zip-chip';
-              chip.textContent = info.count > 1 ? `${zip}×${info.count}` : zip;
 
               const regionText = [...info.regions].filter(Boolean).join(', ');
+              const zipLabel = info.count > 1 ? `${zip}×${info.count}` : zip;
+
+              const zipSpan = document.createElement('span');
+              zipSpan.className = 'chip-zip';
+              zipSpan.textContent = zipLabel;
+              chip.appendChild(zipSpan);
+
               if (regionText) {
-                chip.addEventListener('mouseenter', (e) => showTip(e, `${zip} — ${regionText}\n${info.count} appointment${info.count !== 1 ? 's' : ''}`));
-                chip.addEventListener('mousemove', moveTip);
-                chip.addEventListener('mouseleave', hideTip);
+                const regionSpan = document.createElement('span');
+                regionSpan.className = 'chip-region';
+                regionSpan.textContent = regionText;
+                chip.appendChild(regionSpan);
               }
+
               chipsDiv.appendChild(chip);
             });
 
@@ -742,6 +789,7 @@ document.getElementById('load-btn').addEventListener('click', () => {
     allData = parsePaste(text);
     parseError.style.display = 'none';
     modal.classList.remove('open');
+    document.getElementById('clear-btn').style.display = 'flex';
 
     // Jump to first month in data
     const firstDate = allData.reduce((min, r) => r.date < min ? r.date : min, allData[0].date);
@@ -758,7 +806,21 @@ function showError(msg) {
   parseError.style.display = 'block';
 }
 
-// ── Nav ──
+// ── Clear button ──
+document.getElementById('clear-btn').addEventListener('click', () => {
+  if (!confirm('Clear all calendar data?')) return;
+  allData = [];
+  document.getElementById('stats-bar').style.display = 'none';
+  document.getElementById('clear-btn').style.display = 'none';
+  document.getElementById('cal-weeks').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon">📋</div>
+      <div class="empty-title">No data loaded</div>
+      <div class="empty-sub">Click "Paste Data" and paste your inspection table from Excel to get started.</div>
+    </div>`;
+  document.getElementById('month-label').textContent = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+});
+
 document.getElementById('prev-btn').addEventListener('click', () => {
   currentMonth--;
   if (currentMonth < 0) { currentMonth = 11; currentYear--; }
@@ -835,6 +897,7 @@ allData = parsePaste(SAMPLE);
 currentYear = 2026;
 currentMonth = 6;
 renderCalendar();
+document.getElementById('clear-btn').style.display = 'flex';
 </script>
 </body>
 </html>
