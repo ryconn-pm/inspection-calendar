@@ -284,6 +284,32 @@
     max-width: 90px;
   }
 
+  .zip-chip {
+    position: relative;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    user-select: none;
+  }
+  .zip-chip:hover { opacity: 0.8; }
+
+  .zip-chip.checked {
+    opacity: 0.45;
+  }
+  .zip-chip.checked .chip-zip {
+    text-decoration: line-through;
+  }
+  .zip-chip .chip-check {
+    position: absolute;
+    top: 2px;
+    right: 3px;
+    font-size: 8px;
+    line-height: 1;
+    display: none;
+  }
+  .zip-chip.checked .chip-check {
+    display: block;
+  }
+
   /* ── Paste modal ── */
   .modal-backdrop {
     display: none;
@@ -500,6 +526,7 @@
   <div class="stat">Total appointments: <b id="stat-total">0</b></div>
   <div class="stat">Days with inspections: <b id="stat-days">0</b></div>
   <div class="stat">Unique zip codes: <b id="stat-zips">0</b></div>
+  <div class="stat" id="stat-progress-wrap">AppFolio updated: <b id="stat-progress">0 / 0</b></div>
 </div>
 
 <!-- Paste Modal -->
@@ -529,7 +556,37 @@ let allData = [];
 let currentYear = new Date().getFullYear();
 let currentMonth = new Date().getMonth();
 
-// ── Slot config ──
+// ── AppFolio check state (persisted) ──
+const STORAGE_KEY = 'appfolio_checked';
+
+function loadChecked() {
+  try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function saveChecked(set) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...set])); } catch {}
+}
+function clearChecked() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch {}
+}
+
+let checkedKeys = loadChecked();
+
+function chipKey(dateKey, slotKey, zip) {
+  return `${dateKey}|${slotKey}|${zip}`;
+}
+
+function updateProgressStat() {
+  if (allData.length === 0) return;
+  // Count unique zip+date+slot combos in current dataset
+  const allKeys = new Set();
+  allData.forEach(r => allKeys.add(chipKey(r.dateKey, r.slot, r.zip)));
+  const total = allKeys.size;
+  const done = [...allKeys].filter(k => checkedKeys.has(k)).length;
+  document.getElementById('stat-progress').textContent = `${done} / ${total}`;
+}
+
+
 const SLOT_ORDER = ['9-11am','11-1pm','1-3pm'];
 const SLOT_META = {
   '9-11am':  { label:'9–11am',    cls:'s9'  },
@@ -707,8 +764,9 @@ function renderCalendar() {
           Object.entries(dayData[slotKey])
             .sort((a, b) => a[0].localeCompare(b[0]))
             .forEach(([zip, info]) => {
+              const key = chipKey(dateKey, slotKey, zip);
               const chip = document.createElement('span');
-              chip.className = 'zip-chip';
+              chip.className = 'zip-chip' + (checkedKeys.has(key) ? ' checked' : '');
 
               const regionText = [...info.regions].filter(Boolean).join(', ');
               const zipLabel = info.count > 1 ? `${zip}×${info.count}` : zip;
@@ -724,6 +782,23 @@ function renderCalendar() {
                 regionSpan.textContent = regionText;
                 chip.appendChild(regionSpan);
               }
+
+              const checkMark = document.createElement('span');
+              checkMark.className = 'chip-check';
+              checkMark.textContent = '✓';
+              chip.appendChild(checkMark);
+
+              chip.addEventListener('click', () => {
+                if (checkedKeys.has(key)) {
+                  checkedKeys.delete(key);
+                  chip.classList.remove('checked');
+                } else {
+                  checkedKeys.add(key);
+                  chip.classList.add('checked');
+                }
+                saveChecked(checkedKeys);
+                updateProgressStat();
+              });
 
               chipsDiv.appendChild(chip);
             });
@@ -750,6 +825,7 @@ function renderCalendar() {
     document.getElementById('stat-days').textContent = uniqueDays;
     document.getElementById('stat-zips').textContent = uniqueZips;
     document.getElementById('stats-bar').style.display = 'flex';
+    updateProgressStat();
   }
 }
 
@@ -790,6 +866,8 @@ document.getElementById('load-btn').addEventListener('click', () => {
     parseError.style.display = 'none';
     modal.classList.remove('open');
     document.getElementById('clear-btn').style.display = 'flex';
+    clearChecked();
+    checkedKeys = new Set();
 
     // Jump to first month in data
     const firstDate = allData.reduce((min, r) => r.date < min ? r.date : min, allData[0].date);
@@ -810,6 +888,8 @@ function showError(msg) {
 document.getElementById('clear-btn').addEventListener('click', () => {
   if (!confirm('Clear all calendar data?')) return;
   allData = [];
+  clearChecked();
+  checkedKeys = new Set();
   document.getElementById('stats-bar').style.display = 'none';
   document.getElementById('clear-btn').style.display = 'none';
   document.getElementById('cal-weeks').innerHTML = `
@@ -832,66 +912,6 @@ document.getElementById('next-btn').addEventListener('click', () => {
   renderCalendar();
 });
 
-// ── Load sample data on first visit ──
-const SAMPLE = `Zip Code\tInspection Month\tRegion\tInspection Day\tInspection Date\tTime Slot
-92545\tJuly 2025\tHemet\tWednesday\t7/1/2026\t11-1pm
-92545\tJuly 2025\tHemet\tWednesday\t7/1/2026\t11-1pm
-92544\tJuly 2025\tHemet\tWednesday\t7/1/2026\t1-3pm
-92544\tJuly 2025\tHemet\tWednesday\t7/1/2026\t1-3pm
-92543\tJuly 2025\tHemet\tWednesday\t7/1/2026\t9-11am
-92543\tJuly 2025\tHemet\tWednesday\t7/1/2026\t9-11am
-92583\tJuly 2026\tSan Jacinto / Menifee\tThursday\t7/2/2026\t11-1pm
-92584\tJuly 2026\tSan Jacinto / Menifee\tThursday\t7/2/2026\t11-1pm
-92583\tJuly 2025\tSan Jacinto / Menifee\tThursday\t7/2/2026\t9-11am
-92582\tJuly 2025\tSan Jacinto / Menifee\tThursday\t7/2/2026\t9-11am
-92557\tJuly 2025\tMoreno Valley\tFriday\t7/3/2026\t9-11am
-92505\tJuly 2026\tRiverside City\tFriday\t7/3/2026\t11-1pm
-92507\tJuly 2026\tRiverside City\tFriday\t7/3/2026\t11-1pm
-92508\tJuly 2026\tRiverside City\tFriday\t7/3/2026\t1-3pm
-92509\tJuly 2026\tRiverside City\tFriday\t7/3/2026\t1-3pm
-92507\tJuly 2025\tRiverside City\tFriday\t7/3/2026\t9-11am
-92503\tJuly 2025\tRiverside City\tFriday\t7/3/2026\t9-11am
-92545\tJuly 2026\tHemet\tMonday\t7/6/2026\t11-1pm
-92545\tJuly 2026\tHemet\tMonday\t7/6/2026\t11-1pm
-92545\tJuly 2026\tHemet\tMonday\t7/6/2026\t1-3pm
-92544\tJuly 2026\tHemet\tMonday\t7/6/2026\t1-3pm
-92544\tJuly 2025\tHemet\tMonday\t7/6/2026\t9-11am
-92543\tJuly 2025\tHemet\tMonday\t7/6/2026\t9-11am
-92570\tJuly 2026\tMoreno Valley\tTuesday\t7/7/2026\t9-11am
-92507\tJuly 2026\tRiverside City\tTuesday\t7/7/2026\t11-1pm
-92507\tJuly 2026\tRiverside City\tTuesday\t7/7/2026\t11-1pm
-92507\tJuly 2026\tRiverside City\tTuesday\t7/7/2026\t1-3pm
-92503\tJuly 2026\tRiverside City\tTuesday\t7/7/2026\t1-3pm
-92501\tJuly 2026\tRiverside City\tTuesday\t7/7/2026\t9-11am
-92503\tJuly 2026\tRiverside City\tTuesday\t7/7/2026\t9-11am
-92563\tJuly 2026\tMurrieta / Temecula\tWednesday\t7/8/2026\t11-1pm
-92562\tJuly 2026\tMurrieta / Temecula\tWednesday\t7/8/2026\t11-1pm
-92562\tJuly 2026\tMurrieta / Temecula\tWednesday\t7/8/2026\t1-3pm
-92563\tJuly 2026\tMurrieta / Temecula\tWednesday\t7/8/2026\t1-3pm
-92562\tJuly 2026\tMurrieta / Temecula\tWednesday\t7/8/2026\t9-11am
-92563\tJuly 2026\tMurrieta / Temecula\tWednesday\t7/8/2026\t9-11am
-92545\tJuly 2028\tHemet\tThursday\t7/9/2026\t9-11am
-92543\tJuly 2026\tHemet\tThursday\t7/9/2026\t9-11am
-92404\tJuly 2026\tColton / Rialto / SB\tFriday\t7/10/2026\t11-1pm
-92354\tJuly 2026\tColton / Rialto / SB\tFriday\t7/10/2026\t11-1pm
-92376\tJuly 2026\tColton / Rialto / SB\tFriday\t7/10/2026\t1-3pm
-92405\tJuly 2026\tColton / Rialto / SB\tFriday\t7/10/2026\t9-11am
-92405\tJuly 2026\tColton / Rialto / SB\tFriday\t7/10/2026\t9-11am
-91766\tJuly 2026\tChino / Pomona\tMonday\t7/13/2026\t9-11am
-92881\tJuly 2026\tCorona / Norco\tMonday\t7/13/2026\t11-1pm
-92882\tJuly 2026\tCorona / Norco\tMonday\t7/13/2026\t11-1pm
-92882\tJuly 2026\tCorona / Norco\tMonday\t7/13/2026\t9-11am
-92883\tJuly 2026\tCorona / Norco\tMonday\t7/13/2026\t9-11am
-92555\tJuly 2026\tMoreno Valley\tTuesday\t7/14/2026\t9-11am
-92507\tJuly 2026\tRiverside City\tTuesday\t7/14/2026\t11-1pm
-92507\tJuly 2026\tRiverside City\tTuesday\t7/14/2026\t11-1pm
-92507\tJuly 2026\tRiverside City\tTuesday\t7/14/2026\t1-3pm
-92503\tJuly 2026\tRiverside City\tTuesday\t7/14/2026\t1-3pm
-92503\tJuly 2026\tRiverside City\tTuesday\t7/14/2026\t9-11am
-92509\tJuly 2026\tRiverside City\tTuesday\t7/14/2026\t9-11am
-92506\tJuly 2024\tRiverside City\tWednesday\t7/15/2026\t9-11am
-92507\tJuly 2026\tRiverside City\tWednesday\t7/15/2026\t9-11am
-91766\tJuly 2025\tChino / Pomona\tThursday\t7/16/2026\t9-11am`;
 
 renderCalendar();
 </script>
