@@ -449,17 +449,40 @@
     position: fixed;
     background: var(--text);
     color: #fff;
-    font-size: 11px;
-    padding: 5px 9px;
-    border-radius: 6px;
+    font-size: 12px;
+    padding: 8px 11px;
+    border-radius: 7px;
     pointer-events: none;
     z-index: 300;
-    white-space: nowrap;
     opacity: 0;
     transition: opacity 0.1s;
-    max-width: 220px;
+    max-width: 280px;
     white-space: normal;
-    line-height: 1.5;
+    line-height: 1.55;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  }
+  .tip-addr {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    display: block;
+    padding: 1px 0;
+  }
+  .tip-addr:not(:last-child) {
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    padding-bottom: 4px;
+    margin-bottom: 3px;
+  }
+  .tip-region {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    opacity: 0.55;
+    display: block;
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(255,255,255,0.15);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
   }
 
   @media (max-width: 700px) {
@@ -497,7 +520,7 @@
   <div class="leg"><div class="leg-dot leg-9"></div> 9–11am</div>
   <div class="leg"><div class="leg-dot leg-11"></div> 11am–1pm</div>
   <div class="leg"><div class="leg-dot leg-1"></div> 1–3pm</div>
-  <span style="font-size:11px;color:var(--text3);margin-left:auto">Hover zip codes for region details</span>
+  <span style="font-size:11px;color:var(--text3);margin-left:auto">Hover zip codes to see property addresses</span>
 </div>
 
 <div class="cal-container">
@@ -536,7 +559,7 @@
     <div class="modal-sub">Copy your inspection table in Excel (including the header row), then paste it below. Columns are auto-detected by name.</div>
     <div class="col-hint">
       Expected columns (in any order):<br>
-      <b>Zip Code</b> &nbsp;·&nbsp; <b>Inspection Date</b> &nbsp;·&nbsp; <b>Time Slot</b> &nbsp;·&nbsp; <b>Region</b> (optional) &nbsp;·&nbsp; <b>Inspection Day</b> (optional)
+      <b>Property</b> &nbsp;·&nbsp; <b>Unit</b> &nbsp;·&nbsp; <b>Zip Code</b> &nbsp;·&nbsp; <b>Inspection Date</b> &nbsp;·&nbsp; <b>Time Slot</b> &nbsp;·&nbsp; <b>Region</b> (optional)
     </div>
     <textarea id="paste-area" placeholder="Paste table here (Ctrl+V / Cmd+V)…"></textarea>
     <div class="parse-error" id="parse-error"></div>
@@ -578,14 +601,12 @@ function chipKey(dateKey, slotKey, zip) {
 
 function updateProgressStat() {
   if (allData.length === 0) return;
-  // Count unique zip+date+slot combos in current dataset
   const allKeys = new Set();
   allData.forEach(r => allKeys.add(chipKey(r.dateKey, r.slot, r.zip)));
   const total = allKeys.size;
   const done = [...allKeys].filter(k => checkedKeys.has(k)).length;
   document.getElementById('stat-progress').textContent = `${done} / ${total}`;
 }
-
 
 const SLOT_ORDER = ['9-11am','11-1pm','1-3pm'];
 const SLOT_META = {
@@ -603,6 +624,31 @@ function normalizeSlot(raw) {
   return raw.trim();
 }
 
+// ── Address label builder ──
+function buildAddressLabel(property, unitName) {
+  if (!property && !unitName) return '';
+
+  // Property field looks like "Street Name 1234 - 1234 Street Name City, CA 12345"
+  // Extract the clean address after the first " - "
+  let addr = property || '';
+  const dashIdx = addr.indexOf(' - ');
+  if (dashIdx !== -1) addr = addr.substring(dashIdx + 3).trim();
+
+  // Strip city/state/zip suffix e.g. ", Riverside, CA 92507" or "Riverside, CA 92507-1234"
+  addr = addr.replace(/,?\s+[A-Za-z\s.]+,\s*CA\s+\d{5}(-\d{4})?$/, '').trim();
+
+  // Append unit if present, short, and not already embedded in addr
+  const unitClean = (unitName || '').replace(/^unit\s*#?\s*/i, '').trim();
+  if (unitClean && unitClean !== addr && unitClean.length <= 20) {
+    // Don't append if addr already ends with the unit identifier
+    if (!addr.toLowerCase().endsWith(unitClean.toLowerCase())) {
+      addr = `${addr} — ${unitClean}`;
+    }
+  }
+
+  return addr;
+}
+
 // ── Parse pasted TSV/CSV ──
 function parsePaste(text) {
   const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
@@ -613,7 +659,6 @@ function parsePaste(text) {
 
   const splitLine = (line) => {
     if (delim === '\t') return line.split('\t').map(c => c.trim().replace(/^"|"$/g,''));
-    // CSV with quote handling
     const cols = [];
     let cur = '', inQ = false;
     for (let i = 0; i < line.length; i++) {
@@ -631,13 +676,17 @@ function parsePaste(text) {
   // Map header indices
   const idx = {};
   headers.forEach((h, i) => {
-    if (h.includes('zip')) idx.zip = i;
+    if (h === 'property') idx.property = i;
+    else if (h.includes('zip')) idx.zip = i;
     else if (h.includes('date') && h.includes('inspection')) idx.date = i;
     else if (h.includes('date')) idx.date = idx.date ?? i;
     else if (h.includes('time') || h.includes('slot')) idx.slot = i;
     else if (h.includes('region')) idx.region = i;
     else if (h.includes('day') && h.includes('inspection')) idx.day = i;
     else if (h.includes('month')) idx.month = i;
+    else if (h.includes('address') || h.includes('street')) idx.address = i;
+    // "unit" alone maps to unitname; don't overwrite if already set
+    else if ((h === 'unit' || h.includes('unitname')) && idx.unitname === undefined) idx.unitname = i;
   });
 
   if (idx.zip === undefined) throw new Error('Could not find a "Zip Code" column.');
@@ -651,6 +700,8 @@ function parsePaste(text) {
     const rawDate = (cols[idx.date] || '').trim();
     const rawSlot = (cols[idx.slot] || '').trim();
     const region = idx.region !== undefined ? (cols[idx.region] || '').trim() : '';
+    const property = idx.property !== undefined ? (cols[idx.property] || '').trim() : '';
+    const unitName = idx.unitname !== undefined ? (cols[idx.unitname] || '').trim() : '';
 
     if (!zip || !rawDate || !rawSlot) continue;
 
@@ -675,6 +726,8 @@ function parsePaste(text) {
       dateKey: `${dateObj.getFullYear()}-${dateObj.getMonth()}-${dateObj.getDate()}`,
       slot: normalizeSlot(rawSlot),
       region,
+      property,
+      unitName,
     });
   }
 
@@ -689,9 +742,13 @@ function groupByDateSlotZip(data) {
     if (!map[r.dateKey]) map[r.dateKey] = { date: r.date, slots: {} };
     if (!map[r.dateKey].slots[r.slot]) map[r.dateKey].slots[r.slot] = {};
     const slotZips = map[r.dateKey].slots[r.slot];
-    if (!slotZips[r.zip]) slotZips[r.zip] = { count: 0, regions: new Set() };
+    if (!slotZips[r.zip]) slotZips[r.zip] = { count: 0, regions: new Set(), addresses: [] };
     slotZips[r.zip].count++;
     if (r.region) slotZips[r.zip].regions.add(r.region);
+
+    // Build address label and store it
+    const label = buildAddressLabel(r.property, r.unitName);
+    if (label) slotZips[r.zip].addresses.push(label);
   });
   return map;
 }
@@ -713,10 +770,8 @@ function renderCalendar() {
 
   // Build grid cells
   const cells = [];
-  // Leading blanks
   for (let i = 0; i < startDow; i++) cells.push({ day: null, otherMonth: true });
   for (let d = 1; d <= totalDays; d++) cells.push({ day: d });
-  // Trailing blanks
   while (cells.length % 7 !== 0) cells.push({ day: null, otherMonth: true });
 
   for (let w = 0; w < cells.length / 7; w++) {
@@ -788,6 +843,41 @@ function renderCalendar() {
               checkMark.textContent = '✓';
               chip.appendChild(checkMark);
 
+              // ── Address tooltip on hover ──
+              chip.addEventListener('mouseenter', (e) => {
+                const addrList = info.addresses || [];
+                const tipEl = document.getElementById('tip');
+                tipEl.innerHTML = '';
+
+                if (addrList.length > 0) {
+                  addrList.forEach((addr, i) => {
+                    const span = document.createElement('span');
+                    span.className = 'tip-addr';
+                    span.textContent = addr;
+                    tipEl.appendChild(span);
+                  });
+                  if (regionText) {
+                    const reg = document.createElement('span');
+                    reg.className = 'tip-region';
+                    reg.textContent = regionText;
+                    tipEl.appendChild(reg);
+                  }
+                } else if (regionText) {
+                  const reg = document.createElement('span');
+                  reg.className = 'tip-region';
+                  reg.textContent = regionText;
+                  tipEl.appendChild(reg);
+                } else {
+                  return; // nothing to show
+                }
+
+                tipEl.style.opacity = '1';
+                moveTip(e);
+              });
+              chip.addEventListener('mousemove', moveTip);
+              chip.addEventListener('mouseleave', hideTip);
+
+              // ── Click to check off ──
               chip.addEventListener('click', () => {
                 if (checkedKeys.has(key)) {
                   checkedKeys.delete(key);
@@ -831,14 +921,11 @@ function renderCalendar() {
 
 // ── Tooltip ──
 const tipEl = document.getElementById('tip');
-function showTip(e, text) {
-  tipEl.innerHTML = text.replace(/\n/g,'<br>');
-  tipEl.style.opacity = '1';
-  moveTip(e);
-}
 function moveTip(e) {
-  const x = e.clientX + 12, y = e.clientY - 36;
-  tipEl.style.left = Math.min(x, window.innerWidth - 220) + 'px';
+  const x = e.clientX + 14;
+  const y = e.clientY - 12;
+  const w = tipEl.offsetWidth || 200;
+  tipEl.style.left = Math.min(x, window.innerWidth - w - 12) + 'px';
   tipEl.style.top = Math.max(y, 8) + 'px';
 }
 function hideTip() { tipEl.style.opacity = '0'; }
@@ -911,7 +998,6 @@ document.getElementById('next-btn').addEventListener('click', () => {
   if (currentMonth > 11) { currentMonth = 0; currentYear++; }
   renderCalendar();
 });
-
 
 renderCalendar();
 </script>
