@@ -625,28 +625,35 @@ function normalizeSlot(raw) {
 }
 
 // ── Address label builder ──
+// Joins Address Line 1 (Property) + Address Line 2 (Unit) for the hover card.
+// Zip code and region/city are handled separately and untouched by this function.
 function buildAddressLabel(property, unitName) {
-  if (!property && !unitName) return '';
+  let addr = (property || '').trim();
+  const line2 = (unitName || '').trim();
+  if (!addr && !line2) return '';
 
-  // Property field looks like "Street Name 1234 - 1234 Street Name City, CA 12345"
-  // Extract the clean address after the first " - "
-  let addr = property || '';
+  // Support legacy export format "Name - Street Address, City, CA 12345":
+  // take what's after the first " - " if present.
   const dashIdx = addr.indexOf(' - ');
   if (dashIdx !== -1) addr = addr.substring(dashIdx + 3).trim();
 
-  // Strip city/state/zip suffix e.g. ", Riverside, CA 92507" or "Riverside, CA 92507-1234"
+  // Strip a trailing ", City, CA 12345" suffix if the property field includes one
   addr = addr.replace(/,?\s+[A-Za-z\s.]+,\s*CA\s+\d{5}(-\d{4})?$/, '').trim();
 
-  // Append unit if present, short, and not already embedded in addr
-  const unitClean = (unitName || '').replace(/^unit\s*#?\s*/i, '').trim();
-  if (unitClean && unitClean !== addr && unitClean.length <= 20) {
-    // Don't append if addr already ends with the unit identifier
-    if (!addr.toLowerCase().endsWith(unitClean.toLowerCase())) {
-      addr = `${addr} — ${unitClean}`;
-    }
+  if (!line2) return addr;
+  if (!addr) return line2;
+
+  // Avoid duplicating the unit if it's already the last whole word of the
+  // address (e.g. legacy data like "4237 Trevor Ln A" + unit "A"). Compare
+  // whole words only — NOT a substring/endsWith check — so a unit like "N"
+  // or "T" doesn't get falsely matched against "...Ln" or "...St" and dropped.
+  const lastWord = addr.split(/\s+/).pop() || '';
+  const unitCore = line2.replace(/^unit\s*#?\s*/i, '').trim();
+  if (lastWord.toLowerCase() === unitCore.toLowerCase()) {
+    return addr;
   }
 
-  return addr;
+  return `${addr}, ${line2}`;
 }
 
 // ── Parse pasted TSV/CSV ──
@@ -684,9 +691,11 @@ function parsePaste(text) {
     else if (h.includes('region')) idx.region = i;
     else if (h.includes('day') && h.includes('inspection')) idx.day = i;
     else if (h.includes('month')) idx.month = i;
-    else if (h.includes('address') || h.includes('street')) idx.address = i;
-    // "unit" alone maps to unitname; don't overwrite if already set
+    // "unit" alone, or "Address Line 2", maps to unitname; don't overwrite if already set
     else if ((h === 'unit' || h.includes('unitname')) && idx.unitname === undefined) idx.unitname = i;
+    else if (h.includes('address') && h.includes('2') && idx.unitname === undefined) idx.unitname = i;
+    // "Address Line" / "Address" / "Street" maps to property (address line 1) if not already set
+    else if ((h.includes('address') || h.includes('street')) && idx.property === undefined) idx.property = i;
   });
 
   if (idx.zip === undefined) throw new Error('Could not find a "Zip Code" column.');
